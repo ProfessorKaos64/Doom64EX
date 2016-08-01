@@ -308,5 +308,5 @@ endif (KEXWAD)
 ##
 
 if (NOT WIN32)
-  install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/doom64ex DESTINATION games)
+  install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/doom64ex DESTINATION bin)
 endif ()
