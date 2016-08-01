@@ -1,3 +1,7 @@
+Description: Use FHS compliant path for game binary
+Author: Michael DeGuzis <mdeguzis@gmail.com>
+Last-Update: 2016-08-01
+
 --- a/src/engine/CMakeLists.txt
 +++ b/src/engine/CMakeLists.txt
 @@ -308,5 +308,5 @@
