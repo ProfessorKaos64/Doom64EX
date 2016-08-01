@@ -289,8 +289,9 @@ void M_LoadDefaults(void) {
 void M_ScreenShot(void) {
     char    name[13];
     int     shotnum=0;
+    FILE    *fh;
     byte    *buff;
-    Image   *image;
+    byte    *png;
     int     size;
 
     while(shotnum < 1000) {
@@ -305,6 +306,11 @@ void M_ScreenShot(void) {
         return;
     }
 
+    fh = fopen(name, "wb");
+    if(!fh) {
+        return;
+    }
+
     if((video_height % 2)) {  // height must be power of 2
         return;
     }
@@ -314,11 +320,11 @@ void M_ScreenShot(void) {
 
     // Get PNG image
 
-    image = Image_New_FromData(buff, video_width, video_height, PF_RGB);
-    Image_Save(image, name, "png");
-    Image_Free(image);
+    png = I_PNGCreate(video_width, video_height, buff, &size);
+    fwrite(png, size, 1, fh);
 
-    Z_Free(buff);
+    Z_Free(png);
+    fclose(fh);
 
     I_Printf("Saved Screenshot %s\n", name);
 }
@@ -332,17 +338,12 @@ void M_ScreenShot(void) {
 int M_CacheThumbNail(byte** data) {
     byte* buff;
     byte* tbn;
-    Image* image;
 
-    buff = GL_GetScreenBuffer(0, 0, video_width, video_height);
+//    buff = GL_GetScreenBuffer(0, 0, video_width, video_height);
     tbn = Z_Calloc(SAVEGAMETBSIZE, PU_STATIC, 0);
 
-    image = Image_New_FromData(buff, video_width, video_height, PF_RGB);
-    Image_Scale(image, 128, 128);
-    dmemcpy(tbn, Image_GetData(image), 128 * 128 * 3);
-    Image_Free(image);
-
-    Z_Free(buff);
+//    gluScaleImage(GL_RGB, video_width, video_height, GL_UNSIGNED_BYTE, buff, 128, 128, GL_UNSIGNED_BYTE, tbn);
+//    Z_Free(buff);
 
     *data = tbn;
     return SAVEGAMETBSIZE;

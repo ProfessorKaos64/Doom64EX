@@ -52,8 +52,9 @@ int         thunderCounter = 0;
 int         lightningCounter = 0;
 int         thundertic = 1;
 dboolean    skyfadeback = false;
+byte*       fireBuffer;
+dPalette_t  firePal16[256];
 int         fireLump = -1;
-Image*      fireImage = NULL;
 
 static word CloudOffsetY = 0;
 static word CloudOffsetX = 0;
@@ -597,7 +598,7 @@ static void R_SpreadFire(byte* src1, byte* src2, int pixel, int counter, int* ra
 // R_Fire
 //
 
-static void R_Fire() {
+static void R_Fire(byte *buffer) {
     int counter = 0;
     int rand = 0;
     int step = 0;
@@ -606,7 +607,7 @@ static void R_Fire() {
     byte *srcoffset;
 
     rand = (M_Random() & 0xff);
-    src = Image_GetData(fireImage);
+    src = buffer;
     counter = 0;
     src += FIRESKY_WIDTH;
 
@@ -654,22 +655,23 @@ static rcolor firetexture[FIRESKY_WIDTH * FIRESKY_HEIGHT];
 
 void R_InitFire(void) {
     int i;
-    byte *pixdata;
-    byte *paldata;
 
     fireLump = W_GetNumForName("FIRE") - g_start;
-    fireImage = I_PNGReadData(g_start + fireLump, true, true, false, 0, 0, 0, 0);
-
-    pixdata = Image_GetData(fireImage);
-    for (i = 0; i < 4096; i++)
-        pixdata[i] >>= 4;
-
-    paldata = Palette_GetData(Image_GetPalette(fireImage));
+    dmemset(&firePal16, 0, sizeof(dPalette_t)*256);
     for(i = 0; i < 16; i++) {
-        paldata[i * 3 + 0] = 16 * i;
-        paldata[i * 3 + 1] = 16 * i;
-        paldata[i * 3 + 2] = 16 * i;
+        firePal16[i].r = 16 * i;
+        firePal16[i].g = 16 * i;
+        firePal16[i].b = 16 * i;
+        firePal16[i].a = 0xff;
     }
+
+    // TODO: Re-add Fire
+//    fireBuffer = I_PNGReadData(g_start + fireLump,
+//                               true, true, false, 0, 0, 0, 0);
+//
+//    for(i = 0; i < 4096; i++) {
+//        fireBuffer[i] >>= 4;
+//    }
 }
 
 //
@@ -677,9 +679,10 @@ void R_InitFire(void) {
 //
 
 static void R_FireTicker(void) {
-    if(leveltime & 1) {
-        R_Fire();
-    }
+    // TODO: Re-add Fire
+//    if(leveltime & 1) {
+//        R_Fire(fireBuffer);
+//    }
 }
 
 //
@@ -691,17 +694,6 @@ static void R_DrawFire(void) {
     vtx_t v[4];
     dtexture t = gfxptr[fireLump];
     int i;
-    byte *fireBuffer;
-    dPalette_t *firePal16;
-
-    /* I'm currently lazy as hell. All of this will eventually (well, hopefully) be ported
-       to C++. When that happens, we'll be able to easily and safely convert the fire
-       indexed image to a GL texture with no intermediary copies.
-       But right now I can't be arsed. Talk to me in 2030 when I still haven't done it.
-       -dotfloat
-       TODO: Rewrite this */
-    firePal16 = Palette_GetData(Image_GetPalette(fireImage));
-    fireBuffer = Image_GetData(fireImage);
 
     //
     // copy fire pixel data to texture data array
@@ -710,9 +702,10 @@ static void R_DrawFire(void) {
     for(i = 0; i < FIRESKY_WIDTH * FIRESKY_HEIGHT; i++) {
         byte rgb[3];
 
-        rgb[0] = firePal16[fireBuffer[i]].r;
-        rgb[1] = firePal16[fireBuffer[i]].g;
-        rgb[2] = firePal16[fireBuffer[i]].b;
+        // TODO: Re-add Fire
+//        rgb[0] = firePal16[fireBuffer[i]].r;
+//        rgb[1] = firePal16[fireBuffer[i]].g;
+//        rgb[2] = firePal16[fireBuffer[i]].b;
 
         firetexture[i] = D_RGBA(rgb[2], rgb[1], rgb[0], 0xff);
     }

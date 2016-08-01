@@ -23,11 +23,14 @@
 #ifndef __I_PNG_H__
 #define __I_PNG_H__
 
+#include "png.h"
 #include "doomtype.h"
 
-#include <kex/compat/gfx.h>
+#include <framework/pixmap.h>
 
-Image *I_PNGReadData(int lump, dboolean palette, dboolean nopack, dboolean alpha,
+Pixmap *I_PNGReadData(int lump, dboolean palette, dboolean nopack, dboolean alpha,
                     int* w, int* h, int* offset, int palindex);
+
+byte* I_PNGCreate(int width, int height, byte* data, int* size);
 
 #endif // __I_PNG_H__

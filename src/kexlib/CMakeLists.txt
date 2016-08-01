@@ -35,21 +35,18 @@ add_link_libraries(${PNG_LIBRARIES})
 ## Sources
 ##
 
-set(SOURCES lib.cc
-        format.cc
-        gfx/Image.cc
-  gfx/PngImage.cc
-  gfx/Pixel.cc
-  compat/C_gfx.cc)
+# We're lazy, so add all source files
+file(GLOB_RECURSE C_SOURCES "${CMAKE_SOURCE_DIR}/src/kexlib/*.c")
+file(GLOB_RECURSE C_HEADERS "${CMAKE_SOURCE_DIR}/src/kexlib/*.h")
+file(GLOB_RECURSE CC_SOURCES "${CMAKE_SOURCE_DIR}/src/kexlib/*.cc")
 
 ##------------------------------------------------------------------------------
 ## Build target
 ##
 
-add_library(kexlib STATIC ${SOURCES})
-target_include_directories(kexlib PRIVATE ${INCLUDES} "${CMAKE_SOURCE_DIR}/include")
+add_library(kexlib STATIC ${C_SOURCES} ${C_HEADERS} ${CC_SOURCES})
+target_include_directories(kexlib PRIVATE ${INCLUDES} "${CMAKE_SOURCE_DIR}/include/kexlib")
 target_link_libraries(kexlib m ${LIBRARIES})
-set_target_properties(kexlib PROPERTIES CMAKE_CXX_STANDARD 14)
 
 ##------------------------------------------------------------------------------
 ## Build tests
@@ -58,15 +55,11 @@ set_target_properties(kexlib PROPERTIES CMAKE_CXX_STANDARD 14)
 if (TESTING)
   find_package(GTest REQUIRED)
 
-    set(TEST_SOURCES
-            lib_test.cc
-
-      gfx/Image_test.cc
-      gfx/PngImage_test.cc gfx/Pixel_test.cc)
+  file(GLOB_RECURSE TEST_SOURCES "${CMAKE_SOURCE_DIR}/test/kexlib/*.cc")
 
   add_executable(kexlib_test ${TEST_SOURCES})
-  target_include_directories(kexlib_test PRIVATE ${INCLUDES} "${CMAKE_SOURCE_DIR}/include" ${GTEST_INCLUDE_DIRS})
-  target_link_libraries(kexlib_test kexlib ${GTEST_LIBRARIES})
+  target_include_directories(kexlib_test PRIVATE ${INCLUDES} "${CMAKE_SOURCE_DIR}/include/kexlib" ${GTEST_INCLUDE_DIRS})
+  target_link_libraries(kexlib_test kexlib ${GTEST_BOTH_LIBRARIES})
 
   add_test(AllTestsInKexlib COMMAND kexlib_test)
 
