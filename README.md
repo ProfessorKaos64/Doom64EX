@@ -5,6 +5,11 @@ Doom64EX is a reverse-engineering project aimed to recreate Doom64 as close as p
 
 **NOTE for Linux users:** As of Feb. 24, 2016, the save data is located in `$XDG_DATA_HOME/doom64ex` (typically `~/.local/share/doom64ex`) and not in `~/.doom64ex`. The files can be safely moved to their new home.
 
+## Branches
+
+* `release` - stable release, verified and tested on SteamOS / Debian Jessie.
+* `master` - tracks the upstream master tree, and is not guarenteed to work / build.
+
 ## Dependencies
 
 * SDL2
@@ -12,6 +17,13 @@ Doom64EX is a reverse-engineering project aimed to recreate Doom64 as close as p
 * zlib
 * libpng
 * FluidSynth
+* gcc-5 or clang-3.6 (>=3.6.2) if building from the master tree
+
+For Debian users:
+
+```
+sudo apt-get install cmake debhelper libsdl2-dev libsdl2-net-dev zlib1g-dev libpng12-dev libfluidsynth-dev
+```
 
 ## Compiling
 
