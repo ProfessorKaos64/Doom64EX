@@ -69,8 +69,35 @@ To generate the two latter files, acquire a Doom64 ROM and run:
 
     $ doom64ex -wadgen PATH_TO_ROM
 
-This will generate the required files and place them in `$XDG_DATA_DIR/doom64ex`.
+This will generate the required files and place them in `$XDG_DATA_DIR/doom64ex`. 
 
 After this you can play.
 
     $ doom64ex
+
+# Troubleshooting
+
+## Generating the wad files
+
+If you have trouble generating the wad file, try making a directory, and running wadgen in that directory. For some reason, the output tries to write to the current name of the rom.
+
+```
+mkdir wad_output && cd wad_output
+doom64ex -wadgen ../doom64.z64
+```
+
+When you generate the doom files with the executable, check the permissions:
+
+```
+Sucessfully created /home/desktop/doom64.wad
+Writing Soundfont File...
+
+Sucessfully created /home/desktop/doomsnd.sf2
+desktop@steamos:~$ ls -la /home/desktop/doom64.wad
+-r-------- 1 desktop desktop 8641888 Jul 30 07:25 /home/desktop/doom64.wad
+
+desktop@steamos:~$ ls -la /home/desktop/doomsnd.sf2
+-r-------- 1 desktop desktop 5429302 Jul 30 07:25 /home/desktop/doomsnd.sf2
+```
+
+Try `chmod 755` on those files, and things may work fine.
