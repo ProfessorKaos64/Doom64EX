@@ -22,52 +22,167 @@
 
 #include <algorithm>
 #include <kex/gfx/Pixel>
+#include "Playpal.hh"
 
 using namespace kex::gfx;
 
 namespace {
-  const pixel_traits traits[] = {
-      pixel_traits(),
-      static_pixel_traits<Index4>{},
-      static_pixel_traits<Index8>{},
-      static_pixel_traits<Rgb>{},
-      static_pixel_traits<Bgr>{},
-      static_pixel_traits<Rgba>{},
-      static_pixel_traits<Bgra>{}
+
+  template <class T>
+  constexpr PixelInfo pi()
+  {
+      using Traits = pixel_traits<T>;
+      return PixelInfo {
+          .format = Traits::format,
+          .color = Traits::color,
+          .bytes = Traits::bytes,
+          .alpha = Traits::alpha,
+          .pal_size = Traits::pal_size
+      };
+  }
+
+  const PixelInfo traits[] = {
+      PixelInfo(),
+      pi<Index8>(),
+      pi<Rgb>(),
+      pi<Rgba>()
   };
 
-  size_t calc_length(const pixel_traits *traits, size_t count)
-  {
-      return traits ? traits->bytes * count : 0;
-  }
+  class CopyTransform : public DefaultPixelTransform<void> {
+      const Palette *mSrcPal;
+      const byte *mSrc;
+      const Palette *mDstPal;
+      byte *mDst;
+
+  public:
+      CopyTransform(const Palette *srcPal, const byte *src, const Palette *dstPal, byte *dst):
+          mSrcPal(srcPal),
+          mSrc(src),
+          mDstPal(dstPal),
+          mDst(dst) {}
+
+
+      template <class SrcT, class, class DstT, class>
+      void color_to_color()
+      {
+          auto& src = *reinterpret_cast<const SrcT*>(mSrc);
+          auto& dst = *reinterpret_cast<DstT*>(mDst);
+
+          dst = convert_pixel(src, pixel_traits<DstT>::tag());
+      };
+
+      template <class SrcT, class SrcPalT, class DstT, class>
+      void index_to_color()
+      {
+          assert(mSrcPal);
+
+          auto& srcIdx = *reinterpret_cast<const SrcT*>(mSrc);
+          auto& src = mSrcPal->color_unsafe<SrcPalT>(srcIdx.index);
+          auto& dst = *reinterpret_cast<DstT*>(mDst);
+
+          dst = convert_pixel(src, pixel_traits<DstT>::tag());
+      };
+  };
 }
 
-bad_pixel_format::bad_pixel_format():
-    std::logic_error("bad_pixel_format")
-{
-}
+PixelFormatError::PixelFormatError():
+    std::logic_error("PixelFormatError") {}
 
-const pixel_traits& kex::gfx::get_pixel_traits(pixel_format format)
+const PixelInfo &gfx::get_pixel_info(PixelFormat format)
 {
-    for (const auto &t : traits)
+    for (auto &t : traits)
         if (t.format == format)
             return t;
 
-    return traits[0];
+    throw PixelFormatError("Couldn't find PixelInfo with this format");
 }
 
-Palette::Palette(const Palette &other) noexcept:
-    mColors(other.mColors),
-    mTraits(other.mTraits),
-    mOffset(other.mOffset)
+Palette::Palette(const Palette &other):
+    Palette()
 {
+    *this = other;
 }
 
-Palette& Palette::operator=(const Palette &other) noexcept
+Palette::Palette(PixelFormat format, size_t count, const byte* data):
+    mTraits(&get_pixel_info(format)),
+    mCount(count)
 {
-    mTraits = other.mTraits;
-    mColors = other.mColors;
-    mOffset = other.mOffset;
+    if (!mTraits->color)
+        throw PixelFormatError("Can't create a palette of non-colors");
+
+    if (data) {
+        mData = std::make_unique<byte[]>(count * mTraits->bytes);
+        std::copy_n(data, count * mTraits->bytes, mData.get());
+    } else {
+        auto size = mTraits->bytes * mCount;
+        mData = std::make_unique<byte[]>(size);
+        std::fill_n(mData.get(), size, 0);
+    }
+}
+
+Palette::Palette(PixelFormat format, size_t count, std::unique_ptr<byte[]> data):
+    mTraits(&get_pixel_info(format)),
+    mCount(count)
+{
+    fmt::print(">> {}\n", static_cast<int>(format));
+
+    if (!mTraits->color)
+        throw PixelFormatError("Can't create a palette of non-colors");
+
+    if (data) {
+        mData = std::move(data);
+    } else {
+        auto size = mTraits->bytes * mCount;
+        mData = std::make_unique<byte[]>(size);
+        std::fill_n(mData.get(), size, 0);
+    }
+}
+
+Palette& Palette::operator=(const Palette &other)
+{
+    if (other.empty()) {
+        reset();
+    } else {
+        mTraits = other.mTraits;
+        mCount  = other.mCount;
+
+        auto size = mTraits->bytes * mCount;
+        mData = std::make_unique<byte[]>(size);
+        std::copy_n(other.mData.get(), size, mData.get());
+    }
 
     return *this;
+}
+
+void kex::gfx::copy_pixel(PixelFormat srcFmt,
+                          const Palette *srcPal,
+                          const byte *src,
+                          PixelFormat dstFmt,
+                          const Palette *dstPal,
+                          byte *dst)
+{
+    CopyTransform ct(srcPal, src, dstPal, dst);
+
+    auto srcPalFmt = srcPal ? srcPal->format() : PixelFormat::none;
+    auto dstPalFmt = dstPal ? dstPal->format() : PixelFormat::none;
+
+    transform_pixel(srcFmt, srcPalFmt, dstFmt, dstPalFmt, ct);
+}
+
+std::shared_ptr<const Palette> Palette::black()
+{
+    static std::shared_ptr<const Palette> palette = nullptr;
+    if (!palette)
+        palette = std::make_shared<const Palette>(PixelFormat::rgb, 256, nullptr);
+
+    return palette;
+}
+
+std::shared_ptr<const Palette> Palette::playpal()
+{
+    static std::shared_ptr<const Palette> palette = nullptr;
+    if (!palette)
+        palette = std::make_shared<const Palette>(::playpal);
+
+    return palette;
 }

@@ -25,9 +25,8 @@
 //              in the IWAD.
 //
 //-----------------------------------------------------------------------------
-#ifdef RCSID
-static const char rcsid[] = "$Id: Sound.c 1096 2012-03-31 18:28:01Z svkaiser $";
-#endif
+
+#include <string.h>
 
 #include "wadgen.h"
 #include "rom.h"
@@ -209,7 +208,7 @@ static void Sound_CreateMidiHeader(entry_t * entry, midiheader_t * mthd)
 	mthd->type = WGen_Swap16(1);
 	mthd->ntracks = WGen_Swap16(entry->ntrack);
 	mthd->size = MIDI_HEADER_SIZE;
-	mthd->tracks = Mem_Alloc(sizeof(miditrack_t) * entry->ntrack);
+	mthd->tracks = malloc(sizeof(miditrack_t) * entry->ntrack);
 }
 
 //**************************************************************
@@ -529,7 +528,7 @@ Sound_CreateMidiTrack(midiheader_t * mthd, track_t * track, byte * data,
 	tracksize++;
 
 	mtrk->length = WGen_Swap32(tracksize);
-	mtrk->data = Mem_Alloc(tracksize);
+	mtrk->data = malloc(tracksize);
 	memcpy(mtrk->data, fillbuffer, tracksize);
 
 	mthd->size += tracksize + 8;
@@ -780,7 +779,7 @@ Sound_ProcessData(subpatch_t * in, wavtable_t * wavtable, int samplerate,
 #endif
 
 	outsize = (nsamp * sizeof(short)) + WAV_HEADER_SIZE;
-	outdata = (short *)Mem_Alloc(outsize);
+	outdata = malloc(outsize);
 	wavdata = outdata + (WAV_HEADER_SIZE / 2);
 
 	Sound_CreateWavHeader((byte *) outdata, samplerate, nsamp);
@@ -894,7 +893,7 @@ static void Sound_ProcessSN64(void)
 		sfx[i].ptrindex = i;
 	}
 
-	wavtabledata = (cache *) Mem_Alloc(sizeof(cache) * sn64->nsfx);
+	wavtabledata = malloc(sizeof(cache) * sn64->nsfx);
 
 	for (i = 0; i < sn64->nsfx; i++)
 		wavtabledata[i] = NULL;
@@ -992,7 +991,7 @@ static void Sound_ProcessSSEQ(void)
 	entries = (entry_t *) (sseqfile + ptr);
 	ptr += sseq->entrysiz;
 
-	midis = Mem_Alloc(sizeof(midiheader_t) * sseq->nentry);
+	midis = malloc(sizeof(midiheader_t) * sseq->nentry);
 
 	for (i = 0; i < (int)sseq->nentry; i++) {
 		track_t *track;

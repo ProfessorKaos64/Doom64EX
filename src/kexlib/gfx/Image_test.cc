@@ -1,62 +1,69 @@
 
 #include <gtest/gtest.h>
-
 #include <kex/gfx/Image>
+#include <fstream>
 
 using namespace kex::gfx;
 
-#define WIDTH 256
-#define HEIGHT 128
-
-namespace {
-
-auto rgb_data()
+template <class Callable>
+Image create_rgb_image(uint16 width, uint16 height, Callable &func)
 {
-    auto data = std::make_unique<uint8_t[]>(WIDTH * HEIGHT * 3);
+    Image image(PixelFormat::rgb, width, height, nullptr);
 
-    for (size_t y = 0; y < HEIGHT; y++)
+    for (int y = 0; y < height; y++)
     {
-        for (size_t x = 0; x < WIDTH; x++)
+        for (int x = 0; x < width; x++)
         {
-            uint8_t *ptr = &data[3 * (y * WIDTH + x)];
-
-            ptr[0] = (uint8_t) y;
-            ptr[1] = (uint8_t) x;
-            ptr[2] = (uint8_t) (x ^ y);
+            Rgb c = func(x, y);
+            image.set_pixel(x, y, c);
         }
     }
 
-    return data;
-}
+    return image;
+};
 
-auto rgb_image = make_image(rgb_data().get(), pixel_format::rgb, WIDTH, HEIGHT);
-
-}
-
-TEST(Image, FromDataRgb)
+TEST(Image, comparison)
 {
-    ASSERT_EQ(WIDTH, rgb_image.width());
-    ASSERT_EQ(HEIGHT, rgb_image.height());
+    auto func_1 = [](int x, int y) { return Rgb(x, y, x ^ y); };
+    auto img_1 = create_rgb_image(6, 8, func_1);
+    auto img_2 = create_rgb_image(6, 8, func_1);
+
+    ASSERT_TRUE(img_1 == img_2);
+    ASSERT_FALSE(img_1 != img_2);
+
+    auto func_2 = [](int x, int y) { return Rgb(y, x, x ^ y); };
+    auto img_3 = create_rgb_image(6, 8, func_2);
+
+    ASSERT_TRUE(img_1 != img_3);
+    ASSERT_FALSE(img_1 == img_3);
 }
 
-TEST(Image, ConvertRgbToRgba)
+TEST(Image, crop)
 {
-    auto rgba_image = rgb_image.convert_copy(pixel_format::rgba);
+    std::ifstream fileExpect("testdata/color-crop.png");
+    std::ifstream fileActual("testdata/color.png");
+    ASSERT_TRUE(fileExpect.is_open());
+    ASSERT_TRUE(fileActual.is_open());
 
-    ASSERT_EQ(WIDTH, rgba_image.width());
-    ASSERT_EQ(HEIGHT, rgba_image.height());
+    Image imageExpect(fileExpect);
+    Image imageActual(fileActual);
 
-    uint8_t *rgb_ptr = rgb_image.data_ptr();
-    uint8_t *rgba_ptr = rgba_image.data_ptr();
+    imageActual.resize(imageExpect.width(), imageExpect.height());
 
-    for (size_t i = 0; i < WIDTH * HEIGHT; i++ )
-    {
-        for (size_t j = 0; j < 3; j++)
-        {
-            ASSERT_EQ(rgb_ptr[j], rgba_ptr[j]);
-        }
+    ASSERT_EQ(imageExpect, imageActual);
+}
 
-        rgb_ptr += 3;
-        rgba_ptr += 4;
-    }
+TEST(Image, expand)
+{
+    std::ifstream fileExpect("testdata/color-expand.png");
+    std::ifstream fileActual("testdata/color.png");
+    ASSERT_TRUE(fileExpect.is_open());
+    ASSERT_TRUE(fileActual.is_open());
+
+    Image imageExpect(fileExpect);
+    Image imageActual(fileActual);
+
+    imageActual.resize(imageExpect.width(), imageExpect.height());
+
+    ASSERT_EQ(imageExpect, imageActual);
 }

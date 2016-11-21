@@ -26,232 +26,217 @@
 #include <istream>
 #include "Pixel"
 
-namespace kex
-{
-  namespace gfx
-  {
-    struct image_error : std::runtime_error
-    {
-        using std::runtime_error::runtime_error;
-    };
+namespace kex {
+  namespace gfx {
+    class Image;
 
-    struct image_load_error: image_error
-    {
-        using image_error::image_error;
-    };
+    struct ImageError : std::runtime_error
+    { using std::runtime_error::runtime_error; };
 
-    struct image_save_error: image_error
-    {
-        using image_error::image_error;
-    };
+    struct ImageLoadError: ImageError
+    { using ImageError::ImageError; };
 
-    struct Image;
-    Image make_image(const uint8_t data[], pixel_format format, uint16_t width, uint16_t height);
-    Image make_image(std::unique_ptr<uint8_t[]> data, pixel_format format, uint16_t width, uint16_t height);
+    struct ImageSaveError: ImageError
+    { using ImageError::ImageError; };
 
-    struct image_type
-    {
-        virtual bool detect(std::istream&) const = 0;
+    struct ImageFormatIO {
+        virtual bool is_format(std::istream&) const = 0;
         virtual Image load(std::istream&) const = 0;
-        virtual void save(std::ostream&, const Image&) const = 0;
-        virtual const char* mimetype() const = 0;
+        virtual void save(std::ostream&, Image const&) const = 0;
+        virtual StringView mimetype() const = 0;
     };
 
-    struct Image
-    {
+    struct SpriteOffsets {
+        int x = 0;
+        int y = 0;
+    };
+
+    /**
+     * \brief A container type for images
+     */
+    class Image {
+        const PixelInfo* mTraits = nullptr;
+        uint16 mWidth = 0;
+        uint16 mHeight = 0;
+        std::unique_ptr<byte[]> mData = nullptr;
+        std::shared_ptr<const Palette> mPalette = nullptr;
+        SpriteOffsets mOffsets;
+        uint16 mTransparentIdx = static_cast<uint16>(-1);
+
+        size_t _area() const
+        { return mWidth * mHeight; }
+
+    public:
         Image() = default;
 
-        Image(const Image&);
+        Image(const Image &);
 
         Image(Image&&) noexcept = default;
 
-        Image(uint16_t width, uint16_t height, pixel_format format);
+        Image(PixelFormat format, uint16 width, uint16 height, byte *data);
 
-        Image(std::nullptr_t)
-            :
-            Image()
-        {}
+        explicit Image(PixelFormat format, uint16 width, uint16 height, std::unique_ptr<byte[]> data);
+
+        explicit Image(PixelFormat format, uint16 width, uint16 height, noinit_tag);
 
         Image(std::istream&);
 
-        Image(std::istream&, const char* mimetype);
+        Image(std::istream&, StringView mimetype);
+
+        Image& operator=(const Image &);
+
+        Image& operator=(Image&& other) noexcept = default;
 
         void load(std::istream&);
 
-        void load(std::istream&, const char* mimetype);
+        void load(std::istream&, StringView mimetype);
 
-        void save(std::ostream& s, const char* mimetype) const;
-
-        void reset() noexcept
-        {
-            mTraits = nullptr;
-            mWidth = 0;
-            mHeight = 0;
-            mPalette = nullptr;
-            mData = nullptr;
-        }
+        void save(std::ostream& s, StringView mimetype) const;
 
         Image clone() const
         {
             return Image(*this);
         }
 
-        uint8_t* data_ptr()
+        void reset()
+        { *this = Image(); }
+
+        byte* data_ptr()
         { return mData.get(); }
 
-        const uint8_t* data_ptr() const
+        const byte* data_ptr() const
         { return mData.get(); }
 
-        uint8_t* scanline_ptr(uint16_t index);
+        byte* scanline_ptr(uint16 index);
 
-        const uint8_t* scanline_ptr(uint16_t index) const;
+        const byte* scanline_ptr(uint16 index) const;
 
-        uint8_t* pixel_ptr(uint16_t x, uint16_t y);
-
-        const uint8_t* pixel_ptr(uint16_t x, uint16_t y) const;
-
-        Image& convert(pixel_format);
-
-        Image& resize(uint16_t width, uint16_t height);
-
-        Image& scale(uint16_t width, uint16_t height);
-
-        template<class T, class U = T>
-        auto map()
+        template <class SrcT, class DstT = SrcT>
+        PixelMap<SrcT, DstT> scanline_map(uint16 idx)
         {
-            if (static_pixel_traits<std::decay_t<T>>::format != format())
-                throw bad_pixel_format();
+            test_pixel_format<SrcT>(mTraits);
 
-            auto size = static_pixel_traits<std::decay_t<T>>::bytes * mWidth * mHeight;
-            return pixel_map<T, U>(reinterpret_cast<T*>(data_ptr()),
-                                   reinterpret_cast<T*>(data_ptr() + size));
+            auto ptr = reinterpret_cast<SrcT*>(scanline_ptr(idx));
+            return { ptr, ptr + mWidth };
+        };
+
+        template <class SrcT, class DstT = SrcT>
+        PixelMap<const SrcT, const DstT> scanline_map(uint16 idx) const
+        {
+            test_pixel_format<SrcT>(mTraits);
+
+            auto ptr = reinterpret_cast<const SrcT*>(scanline_ptr(idx));
+            return { ptr, ptr + mWidth };
+        };
+
+        byte* pixel_ptr(uint16 x, uint16 y);
+
+        const byte* pixel_ptr(uint16 x, uint16 y) const;
+
+        template <class T = Rgb>
+        T pixel(uint16 x, uint16 y) const
+        {
+            auto ptr = pixel_ptr(x, y);
+            T px;
+            copy_pixel(format(), mPalette.get(), ptr,
+                       pixel_traits<T>::format, nullptr,
+                       reinterpret_cast<byte *>(&px));
+            return px;
         }
 
-        template<class T, class U = T>
-        auto map() const
+        template <class T = Rgb>
+        void set_pixel(uint16 x, uint16 y, const T &px)
         {
-            if (static_pixel_traits<std::decay_t<T>>::format != format())
-                throw bad_pixel_format();
-
-            auto size = static_pixel_traits<std::decay_t<T>>::bytes * mWidth * mHeight;
-            return pixel_map<const T, const U>(reinterpret_cast<const T*>(data_ptr()),
-                                               reinterpret_cast<const T*>(data_ptr() + size));
+            auto ptr = pixel_ptr(x, y);
+            copy_pixel(pixel_traits<T>::format, nullptr, reinterpret_cast<const byte*>(&px),
+                       format(), mPalette.get(), ptr);
         }
 
-        template<class T>
-        auto auto_map()
+        Image& convert(PixelFormat);
+
+        Image& resize(uint16 width, uint16 height);
+
+        Image& scale(uint16 width, uint16 height);
+
+        template<class SrcT, class DstT = SrcT>
+        PixelMap<SrcT, DstT> map()
         {
-            return auto_pixel_map<T>(traits(), palette(), data_ptr(), data_ptr() + traits().bytes * mWidth * mHeight);
+            test_pixel_format<SrcT>(mTraits);
+
+            auto ptr = reinterpret_cast<SrcT *>(data_ptr());
+            return { ptr, ptr + _area() };
         }
 
-        template<class T>
-        auto auto_map() const
+        template<class SrcT, class DstT = SrcT>
+        PixelMap<const SrcT, const DstT> map() const
         {
-            return auto_pixel_map<const T>(traits(), palette(),
-                                           const_cast<uint8_t*>(data_ptr()),
-                                           const_cast<uint8_t*>(data_ptr()) + traits().bytes * mWidth * mHeight);
+            test_pixel_format<SrcT>(mTraits);
+
+            auto ptr = reinterpret_cast<const SrcT *>(data_ptr());
+            return { ptr, ptr + _area() };
         }
 
-        const pixel_traits& traits() const
+        const PixelInfo &traits() const
         { return *mTraits; }
 
-        pixel_format format() const
+        PixelFormat format() const
         { return mTraits->format; }
 
-        uint16_t width() const
+        uint16 width() const
         { return mWidth; }
 
-        uint16_t height() const
+        uint16 height() const
         { return mHeight; }
 
-        Palette& palette()
+        std::shared_ptr<const Palette> palette() const
         { return mPalette; }
 
-        const Palette& palette() const
-        { return mPalette; }
+        PixelFormat palette_format() const
+        { return mPalette ? mPalette->format() : PixelFormat::none; }
 
-        const int* offsets() const
+        void set_palette(Palette palette)
+        { mPalette = std::make_shared<Palette>(std::move(palette)); }
+
+        void set_palette(const std::shared_ptr<const Palette> &palette)
+        { mPalette = palette; }
+
+        uint16 trans() const
+        { return mTransparentIdx; }
+
+        void set_trans(uint16 idx)
+        { mTransparentIdx = idx; }
+
+        const SpriteOffsets &offsets() const
         { return mOffsets; }
 
-        void offsets(const int *vals)
+        void set_offsets(const SpriteOffsets &offsets)
         {
-            mOffsets[0] = vals[0];
-            mOffsets[1] = vals[1];
+            mOffsets = offsets;
         }
-
-        uint32_t colorkey() const
-        { return mColorkey; }
-
-        void colorkey(std::false_type)
-        {
-            mColorkey = 0;
-            mTransparency = false;
-        }
-
-        void colorkey(uint32_t ck)
-        {
-            mColorkey = ck;
-            mTransparency = true;
-        }
-
-        bool has_transparency() const
-        { return mTransparency; }
 
         bool is_indexed() const
-        { return mTraits->format == pixel_format::index8; }
-
-        Image& operator=(std::nullptr_t)
-        {
-            reset();
-            return *this;
-        }
-
-        Image& operator=(const Image&);
-
-        Image& operator=(Image&& other) noexcept = default;
-
-    private:
-        const pixel_traits* mTraits {nullptr};
-        uint16_t mWidth {0};
-        uint16_t mHeight {0};
-        Palette mPalette {nullptr};
-        std::unique_ptr<uint8_t[]> mData {nullptr};
-        int mOffsets[2] {0};
-        uint32_t mColorkey {0};
-        bool mTransparency {false};
-
-        friend Image make_image(const uint8_t data[], pixel_format format, uint16_t width, uint16_t height);
-        friend Image make_image(std::unique_ptr<uint8_t[]> data, pixel_format format, uint16_t width, uint16_t height);
+        { return !mTraits->color; }
     };
 
-    Image make_image(const uint8_t data[], pixel_format format, uint16_t width, uint16_t height);
+    /**
+     * \brief Equality operator for Image
+     *
+     * \return true if images are isomorphic, false otherwise
+     *
+     * Compares two Image classes. Only returns true if `lhs` is isomorphic to `rhs`.
+     * That is, if `lhs` can be losslessly converted to `rhs` and vice-versa.
+     */
+    bool operator==(const Image &lhs, const Image &rhs);
 
-    inline Image make_image(std::unique_ptr<uint8_t[]> data, pixel_format format, uint16_t width, uint16_t height)
-    {
-        Image retval;
-
-        retval.mData = std::move(data);
-        retval.mTraits = &get_pixel_traits(format);
-        retval.mWidth = width;
-        retval.mHeight = height;
-
-        return retval;
-    }
-
-    template<class T>
-    inline Image make_image(const T data[], uint16_t width, uint16_t height)
-    {
-        constexpr auto format = static_pixel_traits<T>::format;
-        return make_image(reinterpret_cast<const uint8_t*>(data), format, width, height);
-    }
-
-    template<class T>
-    inline Image make_image(std::unique_ptr<T[]> data, uint16_t width, uint16_t height)
-    {
-        constexpr auto format = static_pixel_traits<T>::format;
-        std::unique_ptr<uint8_t[]> d(reinterpret_cast<uint8_t*>(data.release()));
-        return make_image(std::move(d), format, width, height);
-    }
+    /**
+     * \brief Inequality operator for Image
+     *
+     * \return true if images are not isomorphic, false otherwise
+     *
+     * Compares two Image classes. Only returns false if `lhs` is isomorphic to `rhs`.
+     * That is, if `lhs` can be losslessly converted to `rhs` and vice-versa.
+     */
+    bool operator!=(const Image &lhs, const Image &rhs);
   }
 }
 

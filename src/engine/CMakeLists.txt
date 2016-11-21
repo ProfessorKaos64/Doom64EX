@@ -56,9 +56,14 @@ add_include_directories(${FLUIDSYNTH_INCLUDE_DIR})
 add_link_libraries(${FLUIDSYNTH_LIBRARIES})
 
 # OpenGL
-find_package(OpenGL REQUIRED)
-add_include_directories(${OPENGL_INCLUDE_DIRS})
-add_link_libraries(${OPENGL_LIBRARIES})
+if(FORCE_INCLUDE_OPENGL)
+  add_include_directories("/usr/include/GL/")
+  add_link_libraries("/usr/lib32/libGL.so")
+else()
+  find_package(OpenGL REQUIRED)
+  add_include_directories(${OPENGL_INCLUDE_DIRS})
+  add_link_libraries(${OPENGL_LIBRARIES})
+endif(FORCE_INCLUDE_OPENGL)
 
 ##------------------------------------------------------------------------------
 ## Configure "version.h"
@@ -261,14 +266,10 @@ add_sources(wadfile
 add_sources(wadgen
   deflate-N64.c
   deflate-N64.h
-  files.c
-  files.h
   gfx.c
   gfx.h
   level.c
   level.h
-  mem.c
-  mem.h
   png.c
   rom.c
   rom.h
@@ -298,10 +299,6 @@ add_sources(zone
 add_executable(doom64ex MACOSX_BUNDLE ${SOURCES})
 target_include_directories(doom64ex PRIVATE ${INCLUDES} "${CMAKE_SOURCE_DIR}/include")
 target_link_libraries(doom64ex ${LIBRARIES})
-
-if (KEXWAD)
-  add_dependencies(doom64ex kexwad)
-endif (KEXWAD)
 
 ##------------------------------------------------------------------------------
 ## Install target

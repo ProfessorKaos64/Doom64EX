@@ -34,12 +34,9 @@ typedef struct Palette Palette;
 
 typedef enum pixel_format {
     PF_NONE,
-    PF_INDEX4,
     PF_INDEX8,
     PF_RGB,
-    PF_BGR,
     PF_RGBA,
-    PF_BGRA
 } pixel_format;
 
 typedef enum pixel_interp {
@@ -50,8 +47,13 @@ typedef enum pixel_extrap {
     EXTRAP_NEAREST
 } pixel_extrap;
 
+typedef struct SpriteOffsets {
+    int x;
+    int y;
+} SpriteOffsets;
+
 Image* Image_New(uint16_t width, uint16_t height, pixel_format format);
-Image* Image_New_FromData(char *data, uint16_t width, uint16_t height, pixel_format format);
+Image* Image_New_FromData(pixel_format format, uint16_t width, uint16_t height, char *data);
 Image* Image_New_FromMemory(char *data, long size);
 int Image_Save(Image*, const char *filename, const char *format);
 void Image_Resize(Image *src, uint16_t new_width, uint16_t new_height);
@@ -59,8 +61,8 @@ void Image_Free(Image* ptr);
 uint16_t Image_GetWidth(Image*);
 uint16_t Image_GetHeight(Image*);
 void *Image_GetData(Image*);
-Palette *Image_GetPalette(Image*);
-int* Image_GetOffsets(Image*);
+const Palette *Image_GetPalette(Image*);
+SpriteOffsets Image_GetOffsets(Image*);
 int Image_IsIndexed(Image*);
 void Image_Convert(Image*, pixel_format);
 void Image_Scale(Image*, uint16_t new_width, uint16_t new_height);

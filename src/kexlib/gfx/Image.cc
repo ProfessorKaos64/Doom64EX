@@ -30,307 +30,376 @@
 using namespace kex::gfx;
 
 namespace {
-  std::vector<std::unique_ptr<image_type>> image_types;
+  std::vector<std::unique_ptr<ImageFormatIO>> image_formats;
 
-  const image_type *get_mimetype(const char *mimetype)
+  const ImageFormatIO &find_format_by_mimetype(StringView mimetype)
   {
-      for (auto&& x : image_types)
-          if (std::strcmp(x->mimetype(), mimetype) == 0)
-              return x.get();
+      for (const auto &format : image_formats)
+          if (format->mimetype() == mimetype)
+              return *format;
 
-      return nullptr;
+      throw ImageError("Failed to find an appropriate image format based on mimetype");
   }
 
-  const image_type *detect(std::istream &s)
+  const ImageFormatIO &find_format_by_reading(std::istream &stream)
   {
-      auto pos = s.tellg();
+      const auto pos = stream.tellg();
 
-      for (auto&& type : image_types)
+      for (const auto &format: image_formats)
       {
-          if (type->detect(s))
+          if (format->is_format(stream))
           {
-              s.seekg(pos);
-              return type.get();
+              stream.seekg(pos);
+              return *format;
           }
-          s.seekg(pos);
+          stream.seekg(pos);
       }
 
-      throw image_load_error("Failed to detect image type");
+      throw ImageError("Failed to detect image type");
   }
 
-  size_t calc_length(const pixel_traits *traits, uint16_t width, uint16_t height)
+  size_t calc_length(const PixelInfo *traits, uint16 width, uint16 height)
   {
-      if (traits->format == pixel_format::none)
-          throw bad_pixel_format();
+      if (traits->format == PixelFormat::none)
+          throw PixelFormatError();
 
-      return traits->bytes * width * height / traits->pack;
+      return traits->bytes * width * height;
   }
 
-  auto alloc_pixels(const pixel_traits *traits, uint16_t width, uint16_t height)
-  { return std::make_unique<uint8_t[]>(calc_length(traits, width, height)); }
+  class ResizeProcessor : public DefaultPixelProcessor<> {
+      const Image &mSrc;
+      Image &mDst;
 
-  template <class SrcT, class DstT>
-  void convert_indexed_to_normal(const Image &src, Image &dst)
-  {
-      auto srcMap = src.map<Index8>();
-      auto srcIt = srcMap.cbegin();
-      auto srcEnd = srcMap.cend();
-      auto srcPal = src.palette().map<SrcT>().cbegin();
-      auto dstIt = dst.map<DstT>().begin();
+  public:
+      ResizeProcessor(const Image &src, Image &dst):
+          mSrc(src),
+          mDst(dst) {}
 
-      for (; srcIt != srcEnd; ++srcIt, ++dstIt)
-          copy_pixel(*(srcPal + srcIt->index), *dstIt);
-  };
-
-  template <class Src, class Dst>
-  void convert_normal_to_normal(const Image &src, Image &dst)
-  {
-      auto srcMap = src.map<Src>();
-      auto srcIt = srcMap.cbegin();
-      auto srcEnd = srcMap.cend();
-      auto dstIt = dst.map<Dst>().begin();
-
-      for (; srcIt != srcEnd; ++srcIt, ++dstIt)
-          copy_pixel(*srcIt, *dstIt);
-  }
-
-  template <class Src>
-  struct convert_normal_to_unknown : default_pixel_processor {
-      template <class Dst>
-      void normal(const Image &src, Image &dst)
+      template <class T, class>
+      void color()
       {
-          convert_normal_to_normal<Src, Dst>(src, dst);
-      }
-  };
+          int x, y;
+          int h = std::min(mSrc.height(), mDst.height());
+          int w = std::min(mSrc.width(), mDst.width());
 
-  template <class PalSrc>
-  struct convert_indexed_to_unknown : default_pixel_processor {
-      template <class Dst>
-      void normal(const Image &src, Image &dst)
-      {
-          convert_indexed_to_normal<PalSrc, Dst>(src, dst);
-      }
-  };
+          auto srcPad = std::max(0, mSrc.width() - mDst.width());
+          auto srcIt = mSrc.map<T>().cbegin();
+          auto dstIt = mDst.map<T>().begin();
 
-  struct convert_unknown_indexed_to_unknown : default_pixel_processor {
-      template <class Src>
-      void normal(const Image &src, Image &dst)
-      {
-          process_pixel(convert_indexed_to_unknown<Src>(), dst.format(), src, dst);
-      }
-  };
-
-  struct convert_unknown_to_unknown {
-      template <class Src>
-      void normal(const Image &src, Image &dst)
-      {
-          process_pixel(convert_normal_to_unknown<Src>(), dst.format(), src, dst);
-      }
-
-      template <class Src>
-      void indexed(const Image &src, Image &dst)
-      {
-          process_pixel(convert_unknown_indexed_to_unknown(), src.palette().format(), src, dst);
-      }
-  };
-
-  void tconvert(const Image &src, Image &dst)
-  {
-      process_pixel(convert_unknown_to_unknown(), src.format(), src, dst);
-  }
-
-  template <class Src, class Dst>
-  void resize_normal_to_normal(const Image &src, Image &dst)
-  {
-      int h = std::min(src.height(), dst.height());
-      int w = std::min(src.width(), dst.width());
-      auto srcLinePad = (src.width() < dst.width()) ? 0 : src.width() - w;
-      auto dstLinePad = (src.width() < dst.width()) ? dst.width() - w : 0;
-
-      auto srcIt = src.map<Src>().cbegin();
-      auto dstIt = dst.map<Dst>().begin();
-
-      for (int y = 0; y < h; y++)
-      {
-          for (int x = 0; x < w; x++)
+          for (y = 0; y < h; y++)
           {
-              copy_pixel(*srcIt, *dstIt);
-              ++srcIt, ++dstIt;
+              for (x = 0; x < w; x++)
+                  *dstIt++ = convert_pixel(*srcIt++, pixel_traits<T>::tag());
+
+              for (; x < mDst.width(); x++)
+                  *dstIt++ = { };
+
+              srcIt += srcPad;
           }
 
-          srcIt += srcLinePad;
-          dstIt += dstLinePad;
+          for (; y < mDst.height(); y++)
+              for (x = 0; x < mDst.width(); x++)
+                  *dstIt++ = { };
       }
   };
 
-  template <class Src>
-  struct resize_normal_to_unknown : default_pixel_processor {
-      template <class Dst>
-      void normal(const Image &src, Image &dst)
+  class ScaleProcessor : public DefaultPixelProcessor<> {
+      const Image &mSrc;
+      Image &mDst;
+
+  public:
+      ScaleProcessor(const Image &src, Image &dst):
+          mSrc(src),
+          mDst(dst) {}
+
+      template <class T, class>
+      void color()
       {
-          resize_normal_to_normal<Src, Dst>(src, dst);
-      }
-  };
+          auto srcWidth = mSrc.width();
+          auto width = mDst.width();
+          auto height = mDst.height();
+          auto dx = static_cast<double>(mSrc.width()) / width;
+          auto dy = static_cast<double>(mSrc.height()) / height;
 
-  struct resize_unknown_to_unknown : default_pixel_processor {
-      template <class Src>
-      void normal(const Image &src, Image &dst)
-      {
-          process_pixel(resize_normal_to_unknown<Src>(), dst.format(), src, dst);
-      }
-  };
+          auto srcIt = mSrc.map<T>().cbegin();
+          auto dstIt = mDst.map<T>().begin();
 
-  void tresize(const Image &src, Image &dst)
-  {
-      process_pixel(resize_unknown_to_unknown(), src.format(), src, dst);
-  }
-
-  template <class Src, class Dst>
-  void scale_normal_to_normal(const Image &src, Image &dst)
-  {
-      auto srcWidth = src.width();
-      auto width = dst.width();
-      auto height = dst.height();
-      auto dx = static_cast<double>(src.width()) / width;
-      auto dy = static_cast<double>(src.height()) / height;
-
-      auto srcIt = src.map<Src>().cbegin();
-      auto dstIt = dst.map<Dst>().begin();
-
-      for (int y = 0; y < height; y++)
-      {
-          for (int x = 0; x < width; x++)
+          for (int y = 0; y < height; y++)
           {
-              size_t pos = static_cast<size_t>(dy * y) * srcWidth + static_cast<size_t>(dx * x);
-              copy_pixel(*(srcIt + pos), *dstIt);
-              ++dstIt;
+              for (int x = 0; x < width; x++)
+              {
+                  size_t pos = static_cast<size_t>(dy * y) * srcWidth + static_cast<size_t>(dx * x);
+                  *dstIt++ = convert_pixel(*(srcIt + pos), pixel_traits<T>::tag());
+              }
           }
       }
-  }
-
-  template <class Src>
-  struct scale_normal_to_unknown : default_pixel_processor {
-      template <class Dst>
-      void normal(const Image &src, Image &dst)
-      {
-          scale_normal_to_normal<Src, Dst>(src, dst);
-      }
   };
 
-  struct scale_unknown_to_unknown : default_pixel_processor {
-      template <class Src>
-      void normal(const Image &src, Image &dst)
+  class CompareTransform {
+      const Image &mLhs;
+      const Image &mRhs;
+
+  public:
+      CompareTransform(const Image &lhs, const Image &rhs):
+          mLhs(lhs),
+          mRhs(rhs) {}
+
+      template <class SrcT, class, class DstT, class>
+      bool color_to_color()
       {
-          process_pixel(scale_normal_to_unknown<Src>(), dst.format(), src, dst);
+          auto lhsIt = mLhs.map<SrcT>().cbegin();
+          auto lhsEnd = mLhs.map<SrcT>().cend();
+          auto rhsIt = mRhs.map<DstT>().cbegin();
+
+          for (; lhsIt != lhsEnd; ++lhsIt, ++rhsIt)
+              if (*lhsIt != *rhsIt)
+                  return false;
+
+          return true;
       }
+
+      template <class SrcT, class, class DstT, class DstPalT>
+      bool color_to_index()
+      {
+          auto lhsIt = mLhs.map<SrcT>().cbegin();
+          auto lhsEnd = mLhs.map<SrcT>().cend();
+          auto rhsIt = mRhs.map<DstT>().cbegin();
+
+          auto rhsPal = mRhs.palette().get();
+
+          for (; lhsIt != lhsEnd; ++lhsIt, ++rhsIt)
+              if (*lhsIt != rhsPal->color_unsafe<DstPalT>(rhsIt->index))
+                  return false;
+
+          return true;
+      };
+
+      template <class SrcT, class SrcPalT, class DstT, class>
+      bool index_to_color()
+      {
+          auto lhsIt = mLhs.map<SrcT>().cbegin();
+          auto lhsEnd = mLhs.map<SrcT>().cend();
+          auto rhsIt = mRhs.map<DstT>().cbegin();
+
+          auto lhsPal = mLhs.palette().get();
+
+          for (; lhsIt != lhsEnd; ++lhsIt, ++rhsIt)
+              if (lhsPal->color_unsafe<SrcPalT>(lhsIt->index) != *rhsIt)
+                  return false;
+
+          return true;
+      };
+
+      template <class SrcT, class SrcPalT, class DstT, class DstPalT>
+      bool index_to_index()
+      {
+          auto lhsIt = mLhs.map<SrcT>().cbegin();
+          auto lhsEnd = mLhs.map<SrcT>().cend();
+          auto rhsIt = mRhs.map<DstT>().cbegin();
+
+          auto lhsPal = mLhs.palette().get();
+          auto rhsPal = mRhs.palette().get();
+
+          for (; lhsIt != lhsEnd; ++lhsIt, ++rhsIt)
+              if (lhsPal->color_unsafe<SrcPalT>(lhsIt->index) != rhsPal->color_unsafe<DstPalT>(rhsIt->index))
+                  return false;
+
+          return true;
+      };
   };
 
-  void tscale(const Image &src, Image &dst)
-  {
-      process_pixel(scale_unknown_to_unknown(), src.format(), src, dst);
-  }
+  class ConvertTransform : public DefaultPixelTransform<> {
+      const Image &mSrc;
+      Image &mDst;
+
+  public:
+      ConvertTransform(const Image &src, Image &dst):
+          mSrc(src),
+          mDst(dst) {}
+
+      template <class SrcT, class, class DstT, class>
+      void color_to_color()
+      {
+          auto srcMap = mSrc.map<SrcT>();
+          auto srcIt = srcMap.cbegin();
+          auto srcEnd = srcMap.cend();
+          auto dstIt = mDst.map<DstT>().begin();
+
+          for (; srcIt != srcEnd; ++srcIt, ++dstIt)
+              *dstIt = convert_pixel(*srcIt, pixel_traits<DstT>::tag());
+      }
+
+      template <class SrcT, class SrcPalT, class DstT, class>
+      void index_to_color()
+      {
+          assert(mSrc.palette() && !mSrc.palette()->empty());
+
+          auto trans = mSrc.trans();
+          auto srcMap = mSrc.map<SrcT>();
+          auto srcIt = srcMap.cbegin();
+          auto srcEnd = srcMap.cend();
+          auto srcPal = mSrc.palette()->map<SrcPalT>().cbegin();
+          auto dstIt = mDst.map<DstT>().begin();
+
+          for (; srcIt != srcEnd; ++srcIt, ++dstIt)
+          {
+              auto index = srcIt->index;
+              if (index == trans)
+              {
+                  *dstIt = DstT();
+                  continue;
+              } else if (index > trans) {
+                  index--;
+              }
+
+              *dstIt = convert_pixel(*(srcPal + index), pixel_traits<DstT>::tag());
+          }
+      };
+  };
 }
 
-Image kex::gfx::make_image(const uint8_t data[], pixel_format format, uint16_t width, uint16_t height)
+Image::Image(PixelFormat format, uint16 width, uint16 height, byte *data):
+    mTraits(&get_pixel_info(format)),
+    mWidth(width),
+    mHeight(height)
 {
-    Image retval(width, height, format);
+    assert(format != PixelFormat::none);
+    assert(width > 0);
+    assert(height > 0);
 
-    auto length = calc_length(&retval.traits(), width, height);
-    std::copy_n(data, length, retval.data_ptr());
+    auto size = calc_length(mTraits, mWidth, mHeight);
+    mData = std::make_unique<byte[]>(size);
 
-    return retval;
+    if (data) {
+        std::copy_n(data, size, mData.get());
+    } else {
+        std::fill_n(mData.get(), size, 0);
+    }
+
+    if (!mTraits->color)
+        set_palette(Palette { PixelFormat::rgb, mTraits->pal_size, nullptr });
 }
 
-Image::Image(const Image &other):
-        mTraits(other.mTraits),
-        mWidth(other.mWidth),
-        mHeight(other.mHeight),
-        mPalette(other.mPalette),
-        mData(std::make_unique<uint8_t[]>(calc_length(mTraits, mWidth, mHeight)))
-{
-    std::copy_n(other.mData.get(), calc_length(mTraits, mWidth, mHeight), mData.get());
-    offsets(other.offsets());
-}
-
-Image::Image(uint16_t width, uint16_t height, pixel_format format):
-        mTraits(&get_pixel_traits(format)),
+Image::Image(PixelFormat format, uint16 width, uint16 height, std::unique_ptr<byte[]> data):
+        mTraits(&get_pixel_info(format)),
         mWidth(width),
-        mHeight(height),
-        mPalette(make_palette<Rgb>(format)),
-        mData(alloc_pixels(mTraits, width, height)) {}
-
-Image::Image(std::istream &s):
-        Image(detect(s)->load(s)) {}
-
-Image::Image(std::istream &s, const char *format):
-        Image(get_mimetype(format)->load(s)) {}
-
-void Image::load(std::istream &s)
+        mHeight(height)
 {
-    *this = detect(s)->load(s);
+    assert(format != PixelFormat::none);
+    assert(width > 0);
+    assert(height > 0);
+
+    if (data) {
+        mData = std::move(data);
+    } else {
+        auto size = calc_length(mTraits, mWidth, mHeight);
+        mData = std::make_unique<byte[]>(size);
+        std::fill_n(mData.get(), size, 0);
+    }
+
+    if (!mTraits->color)
+        set_palette(Palette { PixelFormat::rgb, mTraits->pal_size, nullptr });
 }
 
-void Image::load(std::istream &s, const char *mimetype)
+Image::Image(PixelFormat format, uint16 width, uint16 height, noinit_tag):
+    mTraits(&get_pixel_info(format)),
+    mWidth(width),
+    mHeight(height)
 {
-    *this = get_mimetype(mimetype)->load(s);
+    assert(format != PixelFormat::none);
+    assert(width > 0);
+    assert(height > 0);
+
+    auto length = calc_length(mTraits, mWidth, mHeight);
+    mData = std::make_unique<byte[]>(length);
 }
 
-void Image::save(std::ostream &s, const char *mimetype) const
-{
-    auto type = get_mimetype(mimetype);
-    type->save(s, *this);
-}
+Image::Image(std::istream &stream):
+    Image(find_format_by_reading(stream).load(stream)) {}
 
-Image& Image::convert(pixel_format format)
+Image::Image(std::istream &stream, StringView mimetype):
+    Image(find_format_by_mimetype(mimetype).load(stream)) {}
+
+/* Delegate the work to some ImageFormatIO object */
+void Image::load(std::istream &stream)
+{ *this = find_format_by_reading(stream).load(stream); }
+
+/* Delegate the work to some ImageFormatIO object */
+void Image::load(std::istream &stream, StringView mimetype)
+{ *this = find_format_by_mimetype(mimetype).load(stream); }
+
+/* Delegate the work to some ImageFormatIO object */
+void Image::save(std::ostream &s, StringView mimetype) const
+{ find_format_by_mimetype(mimetype).save(s, *this); }
+
+Image &Image::convert(PixelFormat format)
 {
     if (mTraits->format == format)
         return *this;
 
-    Image copy { mWidth, mHeight, format };
-    copy.palette() = palette();
-    copy.offsets(offsets());
+    assert(format != PixelFormat::index8);
 
-    tconvert(*this, copy);
+    Image copy(format, mWidth, mHeight, noinit_tag());
+    copy.mOffsets = mOffsets;
+
+    ConvertTransform ct(*this, copy);
+
+    transform_pixel(this->format(), this->palette_format(),
+                    copy.format(), copy.palette_format(), ct);
 
     return (*this = std::move(copy));
 }
 
-Image& Image::resize(uint16_t width, uint16_t height)
+Image& Image::resize(uint16 width, uint16 height)
 {
     if (mWidth == width && mHeight == height)
         return *this;
 
-    Image copy { width, height, mTraits->format };
-    copy.palette() = palette();
-    copy.offsets(offsets());
+    Image copy(mTraits->format, width, height, noinit_tag());
+    copy.mPalette = mPalette;
+    copy.mOffsets = mOffsets;
 
-    tresize(*this, copy);
+    ResizeProcessor rp(*this, copy);
+
+    process_pixel(format(), palette_format(), rp);
 
     return (*this = std::move(copy));
 }
 
-Image& Image::scale(uint16_t width, uint16_t height)
+Image& Image::scale(uint16 width, uint16 height)
 {
     if (mWidth == width && mHeight == height)
         return *this;
 
-    Image copy { width, height, mTraits->format };
-    copy.palette() = palette();
-    copy.offsets(offsets());
+    Image copy(mTraits->format, width, height, noinit_tag());
+    copy.mPalette = mPalette;
+    copy.set_offsets(offsets());
 
-    tscale(*this, copy);
+    ScaleProcessor sp(*this, copy);
+
+    process_pixel(format(), palette_format(), sp);
 
     return (*this = std::move(copy));
 }
 
-uint8_t *Image::scanline_ptr(uint16_t index)
+byte *Image::scanline_ptr(uint16 index)
 {
-    return data_ptr() + mWidth * mTraits->bytes * index / mTraits->pack;
+    return data_ptr() + mWidth * mTraits->bytes * index;
 }
 
-const uint8_t *Image::scanline_ptr(uint16_t index) const
+const byte *Image::scanline_ptr(uint16 index) const
 {
-    return data_ptr() + mWidth * mTraits->bytes * index / mTraits->pack;
+    return data_ptr() + mWidth * mTraits->bytes * index;
+}
+
+byte *Image::pixel_ptr(uint16 x, uint16 y)
+{
+    return data_ptr() + (mWidth * y + x) * mTraits->bytes;
+}
+
+const byte *Image::pixel_ptr(uint16 x, uint16 y) const
+{
+    return data_ptr() + (mWidth * y + x) * mTraits->bytes;
 }
 
 Image& Image::operator=(const Image &other)
@@ -339,17 +408,37 @@ Image& Image::operator=(const Image &other)
     mWidth = other.mWidth;
     mHeight = other.mHeight;
     mPalette = other.mPalette;
+    mOffsets = other.mOffsets;
 
     auto length = calc_length(mTraits, mWidth, mHeight);
-    mData = std::make_unique<uint8_t[]>(length);
+    mData = std::make_unique<byte[]>(length);
     std::copy_n(other.mData.get(), length, mData.get());
-    offsets(other.offsets());
+
     return *this;
 }
 
-std::unique_ptr<image_type> __initialize_png();
+bool kex::gfx::operator==(const Image &lhs, const Image &rhs)
+{
+    if (&lhs == &rhs)
+        return true;
+
+    if (lhs.width() != rhs.width() || lhs.height() != rhs.height())
+        return false;
+
+    CompareTransform ct(lhs, rhs);
+
+    return transform_pixel<CompareTransform, bool>(lhs.format(), lhs.palette_format(),
+                                 rhs.format(), rhs.palette_format(), ct);
+}
+
+bool kex::gfx::operator!=(const Image &lhs, const Image &rhs)
+{ return !(lhs == rhs); }
+
+std::unique_ptr<ImageFormatIO> __initialize_png();
+std::unique_ptr<ImageFormatIO> __initialize_doom_image();
 
 void kex::lib::init_image()
 {
-    image_types.emplace_back(__initialize_png());
+    image_formats.emplace_back(__initialize_png());
+    image_formats.emplace_back(__initialize_doom_image());
 }

@@ -25,10 +25,8 @@
 //                              A majority of the application's workload is spent here...
 //
 //-----------------------------------------------------------------------------
-#ifdef RCSID
-static const char rcsid[] =
-    "$Id: sprite.c 1096 2012-03-31 18:28:01Z svkaiser $";
-#endif
+
+#include <memory.h>
 
 #include "wadgen.h"
 #include "sprite.h"
@@ -177,8 +175,8 @@ void Sprite_Convert(int lump)
 	// of 8 or 16. Tile height pieces are always in multiples of 4
 	rs->compressed == -1 ? (_PAD8(rs->width)) : (_PAD16(rs->width));
 
-	buffer = (byte *) Mem_Alloc(sizeof(byte) * (rs->width * rs->height));
-	exs->data = (byte *) Mem_Alloc(sizeof(byte) * (rs->width * rs->height) +
+	buffer = malloc(sizeof(byte) * (rs->width * rs->height));
+	exs->data = malloc(sizeof(byte) * (rs->width * rs->height) +
 				       (rs->compressed ==
 					-1 ? 0 : (sizeof(dPalette_t) * 256)));
 
@@ -291,6 +289,8 @@ void Sprite_Convert(int lump)
 			exs->palette[0].b = 0;
 		}
 	}
+
+	free(buffer);
 }
 
 //**************************************************************
